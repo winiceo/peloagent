@@ -1,258 +1,240 @@
-import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
-import { Layout, Icon, message } from 'antd';
-import DocumentTitle from 'react-document-title';
+import React from 'react';
 import { connect } from 'dva';
-import { routerRedux } from 'dva/router';
-import { ContainerQuery } from 'react-container-query';
-import classNames from 'classnames';
+import { Layout } from 'antd';
+import { Switch, routerRedux } from 'dva/router';
+import NavBar from 'components/NavBar';
+import { LeftSideBar, RightSideBar } from 'components/SideBar';
+import TopBar from 'components/TopBar';
+import SkinToolbox from 'components/SkinToolbox';
 import pathToRegexp from 'path-to-regexp';
-import { enquireScreen, unenquireScreen } from 'enquire-js';
-import GlobalHeader from 'components/GlobalHeader';
-import GlobalFooter from 'components/GlobalFooter';
-import SiderMenu from 'components/SiderMenu';
-import Authorized from 'utils/Authorized';
-import { getMenuData } from 'common/menu';
-import logo from 'assets/logo1.svg';
-
-const { Content, Header, Footer } = Layout;
-const { check } = Authorized;
+import ElementQueries from 'css-element-queries/src/ElementQueries';
+import './styles/basic.less';
+import $$ from 'cmn-utils';
+import cx from 'classnames';
+const { Content, Header } = Layout;
 
 /**
- * 根据菜单取得重定向地址.
+ * 基本部局
+ * 可设置多种皮肤 theme: [light, grey, primary, info, warning, danger, alert, system, success, dark]
+ * 可设置多种布局 [header(固定头), sidebar(固定边栏), breadcrumb(固定面包蟹)]
+ * @author weiq
  */
-const redirectData = [];
-const getRedirect = item => {
-  if (item && item.children) {
-    if (item.children[0] && item.children[0].path) {
-      redirectData.push({
-        from: `${item.path}`,
-        to: `${item.children[0].path}`,
-      });
-      item.children.forEach(children => {
-        getRedirect(children);
-      });
+@connect(({ global }) => ({ global }))
+export default class BasicLayout extends React.PureComponent {
+  constructor(props) {
+    super(props);
+    const user = $$.getStore('user', []);
+    const theme = $$.getStore('theme', {
+      leftSide: 'darkgrey', // 左边
+      navbar: 'light' // 顶部
+    });
+    if (!theme.layout) {
+      theme.layout = [
+        'fixedHeader',
+        'fixedSidebar',
+        'fixedBreadcrumbs'
+        // 'hidedBreadcrumbs',
+      ];
     }
-  }
-};
-getMenuData().forEach(getRedirect);
-
-/**
- * 获取面包屑映射
- * @param {Object} menuData 菜单配置
- * @param {Object} routerData 路由配置
- */
-const getBreadcrumbNameMap = (menuData, routerData) => {
-  const result = {};
-  const childResult = {};
-  for (const i of menuData) {
-    if (!routerData[i.path]) {
-      result[i.path] = i;
-    }
-    if (i.children) {
-      Object.assign(childResult, getBreadcrumbNameMap(i.children, routerData));
-    }
-  }
-  return Object.assign({}, routerData, result, childResult);
-};
-
-const query = {
-  'screen-xs': {
-    maxWidth: 575,
-  },
-  'screen-sm': {
-    minWidth: 576,
-    maxWidth: 767,
-  },
-  'screen-md': {
-    minWidth: 768,
-    maxWidth: 991,
-  },
-  'screen-lg': {
-    minWidth: 992,
-    maxWidth: 1199,
-  },
-  'screen-xl': {
-    minWidth: 1200,
-  },
-};
-
-let isMobile;
-enquireScreen(b => {
-  isMobile = b;
-});
-
-class BasicLayout extends React.PureComponent {
-  static childContextTypes = {
-    location: PropTypes.object,
-    breadcrumbNameMap: PropTypes.object,
-  };
-  state = {
-    isMobile,
-  };
-  getChildContext() {
-    const { location, routerData } = this.props;
-    return {
-      location,
-      breadcrumbNameMap: getBreadcrumbNameMap(getMenuData(), routerData),
+    this.state = {
+      collapsedLeftSide: false, // 左边栏开关控制
+      leftCollapsedWidth: 60, // 左边栏宽度
+      expandTopBar: false, // 头部多功能区开合
+      showSidebarHeader: false, // 左边栏头部开关
+      collapsedRightSide: true, // 右边栏开关
+      theme, // 皮肤设置
+      user,
+      currentMenu: {}
     };
+
+    props.dispatch({
+      type: 'global/getMenu'
+    });
   }
+
   componentDidMount() {
-    this.enquireHandler = enquireScreen(mobile => {
-      this.setState({
-        isMobile: mobile,
-      });
-    });
-    this.props.dispatch({
-      type: 'user/fetchCurrent',
-    });
+    ElementQueries.init();
   }
-  componentWillUnmount(){
-    unenquireScreen(this.enquireHandler);
-  }
-  getPageTitle() {
-    const { routerData, location } = this.props;
-    const { pathname } = location;
-    let title = 'Umi Antd Pro';
-    let currRouterData = null;
-    // match params path
-    Object.keys(routerData).forEach(key => {
-      if (pathToRegexp(key).test(pathname)) {
-        currRouterData = routerData[key];
-      }
-    });
-    if (currRouterData && currRouterData.name) {
-      title = `${currRouterData.name} - PELO代理系统`;
-    }
-    return title;
-  }
-  getBashRedirect = () => {
-    // According to the url parameter to redirect
-    // 这里是重定向的,重定向到 url 的 redirect 参数所示地址
-    const urlParams = new URL(window.location.href);
-    console.log(urlParams);
-    const redirect = urlParams.searchParams.get('redirect');
-    // Remove the parameters in the url
-    if (redirect) {
-      console.log(redirect);
-      urlParams.searchParams.delete('redirect');
-      window.history.replaceState(null, 'redirect', urlParams.href);
+
+  componentWillMount() {
+    // 检查有户是否登录
+    const user = $$.getStore('user');
+    if (!user) {
+      this.props.dispatch(routerRedux.replace('/sign/login'));
     } else {
-      const { routerData } = this.props;
-      // get the first authorized route path in routerData
-      const authorizedPath = Object.keys(routerData).find(
-        item => check(routerData[item].authority, item) && item !== '/'
-      );
-      // this.props.dispatch(routerRedux.push(authorizedPath));
-      return authorizedPath;
     }
-    // this.props.dispatch(routerRedux.push(redirect));
-    
-    return redirect;
-  };
-  handleMenuCollapse = collapsed => {
-    this.props.dispatch({
-      type: 'global/changeLayoutCollapsed',
-      payload: collapsed,
-    });
-  };
-  handleNoticeClear = type => {
-    message.success(`清空了${type}`);
-    this.props.dispatch({
-      type: 'global/clearNotices',
-      payload: type,
-    });
-  };
-  handleMenuClick = ({ key }) => {
-    if (key === 'triggerError') {
-      this.props.dispatch(routerRedux.push('/Exception/triggerException'));
-      return;
-    }
-    if (key === 'logout') {
-      this.props.dispatch({
-        type: 'login/logout',
+  }
+
+  componentWillReceiveProps(nextProps) {
+    if (
+      nextProps.location.pathname !== this.props.location.pathname ||
+      nextProps.global.flatMenu !== this.props.global.flatMenu
+    ) {
+      this.setState({
+        currentMenu: this.getCurrentMenu(nextProps) || {}
       });
     }
+  }
+
+  getCurrentMenu(props) {
+    const {
+      location: { pathname },
+      global
+    } =
+      props || this.props;
+    const menu = this.getMeunMatchKeys(global.flatMenu, pathname)[0];
+    return menu;
+  }
+
+  getMeunMatchKeys = (flatMenu, path) => {
+    return flatMenu.filter(item => {
+      return pathToRegexp(item.path).test(path);
+    });
   };
-  handleNoticeVisibleChange = visible => {
-    if (visible) {
-      this.props.dispatch({
-        type: 'global/fetchNotices',
-      });
-    }
+
+  /**
+   * 顶部左侧菜单图标收缩控制
+   */
+  onCollapseLeftSide = _ => {
+    const collapsedLeftSide =
+      this.state.leftCollapsedWidth === 0
+        ? true
+        : !this.state.collapsedLeftSide;
+    const collapsedRightSide =
+      this.state.collapsedRightSide || !collapsedLeftSide;
+
+    this.setState({
+      collapsedLeftSide,
+      collapsedRightSide,
+      leftCollapsedWidth: 60
+    });
   };
+
+  /**
+   * 完全关闭左边栏，即宽为0
+   */
+  onCollapseLeftSideAll = _ => {
+    this.setState({
+      collapsedLeftSide: true,
+      leftCollapsedWidth: 0
+    });
+  };
+
+  /**
+   * 展开面包屑所在条中的多功能区
+   */
+  onExpandTopBar = _ => {
+    this.setState({
+      expandTopBar: true
+    });
+  };
+
+  /**
+   * 与上面相反
+   */
+  onCollapseTopBar = _ => {
+    this.setState({
+      expandTopBar: false
+    });
+  };
+
+  /**
+   * 切换左边栏中头部的开合
+   */
+  toggleSidebarHeader = _ => {
+    this.setState({
+      showSidebarHeader: !this.state.showSidebarHeader
+    });
+  };
+
+  /**
+   * 切换右边栏
+   */
+  toggleRightSide = _ => {
+    this.setState({
+      collapsedLeftSide: this.state.collapsedRightSide,
+      collapsedRightSide: !this.state.collapsedRightSide
+    });
+  };
+
+  onChangeTheme = theme => {
+    $$.setStore('theme', theme);
+    this.setState({
+      theme
+    });
+  };
+
   render() {
     const {
-      currentUser,
-      collapsed,
-      fetchingNotices,
-      notices,
-      location,
-      children
-    } = this.props;
-    // const bashRedirect = this.getBashRedirect();
-    this.getBashRedirect();
-    const layout = (
-      <Layout>
-        <SiderMenu
-          logo={logo}
-          // 不带Authorized参数的情况下如果没有权限,会强制跳到403界面
-          // If you do not have the Authorized parameter
-          // you will be forced to jump to the 403 interface without permission
-          Authorized={Authorized}
-          menuData={getMenuData()}
-          collapsed={collapsed}
-          location={location}
-          isMobile={this.state.isMobile}
-          onCollapse={this.handleMenuCollapse}
-        />
-        <Layout>
-          <Header style={{ padding: 0 }}>
-            <GlobalHeader
-              logo={logo}
-              currentUser={currentUser}
-              fetchingNotices={fetchingNotices}
-              notices={notices}
-              collapsed={collapsed}
-              isMobile={this.state.isMobile}
-              onNoticeClear={this.handleNoticeClear}
-              onCollapse={this.handleMenuCollapse}
-              onMenuClick={this.handleMenuClick}
-              onNoticeVisibleChange={this.handleNoticeVisibleChange}
-            />
-          </Header>
-          <Content style={{ margin: '24px 24px 0', height: '100%' }}>
-            {children}
-          </Content>
-          <Footer style={{ padding: 0 }}>
-            <GlobalFooter
-              links={[
-
-              ]}
-              copyright={
-                <Fragment>
-                  Copyright <Icon type="copyright" /> 2018 pelo出品
-                </Fragment>
-              }
-            />
-          </Footer>
-        </Layout>
-      </Layout>
-    );
+      collapsedLeftSide,
+      leftCollapsedWidth,
+      expandTopBar,
+      showSidebarHeader,
+      collapsedRightSide,
+      theme,
+      user,
+      currentMenu
+    } = this.state;
+    const { routerData, location, global } = this.props;
+    const { menu, flatMenu } = global;
+    const { childRoutes } = routerData;
+    const classnames = cx('basic-layout', 'full-layout', {
+      fixed: theme.layout && theme.layout.indexOf('fixedSidebar') !== -1,
+      'fixed-header':
+        theme.layout && theme.layout.indexOf('fixedHeader') !== -1,
+      'fixed-breadcrumbs':
+        theme.layout && theme.layout.indexOf('fixedBreadcrumbs') !== -1,
+      'hided-breadcrumbs':
+        theme.layout && theme.layout.indexOf('hidedBreadcrumbs') !== -1
+    });
 
     return (
-      <DocumentTitle title={this.getPageTitle()}>
-        <ContainerQuery query={query}>
-          {params => <div className={classNames(params)}>{layout}</div>}
-        </ContainerQuery>
-      </DocumentTitle>
+      <Layout className={classnames}>
+        <Header>
+          <NavBar
+            collapsed={collapsedLeftSide}
+            onCollapseLeftSide={this.onCollapseLeftSide}
+            onExpandTopBar={this.onExpandTopBar}
+            toggleSidebarHeader={this.toggleSidebarHeader}
+            theme={theme.navbar}
+            user={user}
+          />
+        </Header>
+        <Layout>
+          <LeftSideBar
+            collapsed={collapsedLeftSide}
+            leftCollapsedWidth={leftCollapsedWidth}
+            showHeader={showSidebarHeader}
+            onCollapse={this.onCollapseLeftSide}
+            onCollapseAll={this.onCollapseLeftSideAll}
+            location={location}
+            theme={theme.leftSide}
+            flatMenu={flatMenu}
+            currentMenu={currentMenu}
+            menu={menu}
+            user={user}
+          />
+          <Content>
+            <Layout className="full-layout">
+              <Header>
+                <TopBar
+                  expand={expandTopBar}
+                  toggleRightSide={this.toggleRightSide}
+                  collapsedRightSide={collapsedRightSide}
+                  onCollapse={this.onCollapseTopBar}
+                  currentMenu={currentMenu}
+                  theme={theme}
+                />
+              </Header>
+              <Content className="router-page">
+                <Switch>{childRoutes}</Switch>
+              </Content>
+            </Layout>
+          </Content>
+          <RightSideBar collapsed={collapsedRightSide} />
+        </Layout>
+        <SkinToolbox onChangeTheme={this.onChangeTheme} theme={theme} />
+      </Layout>
     );
   }
 }
-
-export default connect(({ user, global, loading }) => ({
-  currentUser: user.currentUser,
-  collapsed: global.collapsed,
-  fetchingNotices: loading.effects['global/fetchNotices'],
-  notices: global.notices,
-}))(BasicLayout);

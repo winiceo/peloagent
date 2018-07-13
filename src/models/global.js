@@ -1,82 +1,60 @@
-import { queryNotices } from '../services/api';
-import { getAuthority } from 'utils/authority';
-import { routerRedux } from 'dva/router';
+import $$ from 'cmn-utils';
+import modelEnhance from '@/utils/modelEnhance';
 
-export default {
+export default modelEnhance({
   namespace: 'global',
 
   state: {
-    collapsed: false,
-    notices: [],
+    menu: [],
+    flatMenu: [],
   },
 
   effects: {
-    *fetchNotices(_, { call, put }) {
-      const data = yield call(queryNotices);
-      yield put({
-        type: 'saveNotices',
-        payload: data,
-      });
-      yield put({
-        type: 'user/changeNotifyCount',
-        payload: data.length,
-      });
-    },
-    *clearNotices({ payload }, { put, select }) {
-      yield put({
-        type: 'saveClearedNotices',
-        payload,
-      });
-      const count = yield select(state => state.global.notices.length);
-      yield put({
-        type: 'user/changeNotifyCount',
-        payload: count,
-      });
-    },
-    *init({payload},{put}){
-      const author = getAuthority();
-      if(author === 'guest'||!author){
-        yield put(routerRedux.push('/User/Login'))
-      }else{
-        yield put(routerRedux.push('/Finance/Deposit'))
+    *getMenu({ payload }, { call, put }) {
+      const { status, data } = yield call(getMenu, payload);
+      if (status) {
+        const loopMenu = (menu, pitem = {}) => {
+          menu.forEach(item => {
+            if (pitem.path) {
+              item.parentPath = pitem.parentPath ? pitem.parentPath.concat(pitem.path) : [pitem.path];
+            }
+            if (item.children && item.children.length) {
+              loopMenu(item.children, item);
+            }
+          });
+        }
+        loopMenu(data);
+        
+        yield put({
+          type: 'getMenuSuccess',
+          payload: data,
+        });
       }
-    }
+    },
   },
 
   reducers: {
-    changeLayoutCollapsed(state, { payload }) {
+    getMenuSuccess(state, { payload }) {
       return {
         ...state,
-        collapsed: payload,
+        menu: payload,
+        flatMenu: getFlatMenu(payload),
       };
-    },
-    saveNotices(state, { payload }) {
-      return {
-        ...state,
-        notices: payload,
-      };
-    },
-    saveClearedNotices(state, { payload }) {
-      return {
-        ...state,
-        notices: state.notices.filter(item => item.type !== payload),
-      };
-    },
+    }
   },
+});
 
-  subscriptions: {
-    setup({ history,dispatch }) {
-      // Subscribe history(url) change, trigger `load` action if pathname is `/`
-      return history.listen(({ pathname, search }) => {
-        if (typeof window.ga !== 'undefined') {
-          window.ga('send', 'pageview', pathname + search);
-        }
-        if(pathname==='/'){
-          dispatch({
-            type:"init"
-          })
-        }
-      });
-    },
-  },
-};
+export function getFlatMenu(menus) {
+  let menu = [];
+  menus.forEach(item => {
+    if (item.children) {
+      menu = menu.concat(getFlatMenu(item.children));
+    }
+    menu.push(item);
+  });
+  return menu;
+}
+
+export async function getMenu(payload) {
+  return $$.post('/user/menu', payload);
+}
